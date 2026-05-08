@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeDiff Pro</title>
+    <script src="https://cdn.staticfile.net/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0d1117;
+            --sidebar-bg: #161b22;
+            --toolbar-bg: #010409;
+            --border-color: #30363d;
+            --text-main: #c9d1d9;
+            --text-mute: #8b949e;
+            --accent: #2f81f7;
+            --danger: #f85149;
+            --success: #3fb950;
+        }
+
+        body {
+            margin: 0; padding: 0; height: 100vh;
+            display: flex; flex-direction: column;
+            background: var(--bg-dark); color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        header {
+            height: 48px; background: var(--toolbar-bg);
+            display: flex; align-items: center; padding: 0 20px;
+            border-bottom: 1px solid var(--border-color); gap: 20px; z-index: 10;
+        }
+
+        .logo { font-size: 13px; font-weight: 600; color: var(--accent); letter-spacing: 1px; }
+
+        .nav-actions { display: flex; gap: 10px; margin-left: auto; }
+
+        .btn {
+            padding: 5px 12px; font-size: 12px; border-radius: 6px; cursor: pointer;
+            border: 1px solid var(--border-color); background: #21262d; color: var(--text-main);
+            transition: all 0.2s; display: flex; align-items: center; gap: 5px;
+        }
+        .btn:hover { background: #30363d; border-color: #8b949e; }
+        .btn-outline-danger { color: var(--text-mute); }
+        .btn-outline-danger:hover { color: var(--danger); border-color: var(--danger); background: rgba(248, 81, 73, 0.05); }
+
+        main { display: flex; flex: 1; overflow: hidden; }
+
+        #sidebar {
+            width: 260px; background: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex; flex-direction: column;
+        }
+
+        .upload-section { padding: 16px; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--border-color); }
+        .upload-title { font-size: 11px; color: var(--text-mute); font-weight: bold; margin-bottom: 4px; display: block; }
+        input[type="file"] { display: none; }
+
+        #tree-container { flex: 1; overflow-y: auto; padding: 10px 0; }
+        .tree-list { list-style: none; padding-left: 14px; margin: 0; }
+        .tree-item {
+            display: flex; align-items: center; padding: 6px 12px; cursor: pointer;
+            font-size: 13px; color: var(--text-mute); border-radius: 4px; margin: 1px 6px;
+            transition: 0.1s;
+        }
+        .tree-item:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-main); }
+        .tree-item.active { background: rgba(47, 129, 247, 0.15); color: var(--accent); }
+
+        .folder-icon { width: 18px; color: #dcb67a; font-size: 14px; }
+        .file-icon { width: 18px; color: var(--text-mute); font-size: 14px; }
+        
+        .status-added { color: var(--success); }
+        .status-modified { color: #e3b341; }
+        .status-deleted { color: var(--danger); text-decoration: line-through; }
+
+        #editor-wrapper { flex: 1; background: var(--bg-dark); position: relative; }
+        #monaco-diff { width: 100%; height: 100%; }
+
+        #loading-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg-dark); display: flex; justify-content: center;
+            align-items: center; z-index: 100; color: var(--text-mute); font-size: 13px;
+        }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 10px; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">CODEDIFF PRO</div>
+        
+        <div style="font-size: 11px; color: var(--text-mute); margin-left: 10px;">THEME</div>
+        <select id="theme-selector" onchange="changeTheme()" style="background:#21262d; color:white; border:1px solid #30363d; padding:2px 8px; border-radius:4px; font-size:12px; outline: none;">
+            <option value="vs-dark">GitHub Dark</option>
+            <option value="vs">Classic Light</option>
+        </select>
+
+        <div class="nav-actions">
+            <button class="btn btn-outline-danger" onclick="clearWorkspace()">
+                <span>🧹</span> 清空工作区
+            </button>
+        </div>
+    </header>
+
+    <main>
+        <div id="sidebar">
+            <div class="upload-section">
+                <div>
+                    <span class="upload-title">VERSION 1 (OLD)</span>
+                    <label class="btn" style="width: 100%; box-sizing: border-box; justify-content: center;">
+                        📂 载入旧项目
+                        <input type="file" id="upload-v1" webkitdirectory multiple>
+                    </label>
+                </div>
+                <div>
+                    <span class="upload-title">VERSION 2 (NEW)</span>
+                    <label class="btn" style="width: 100%; box-sizing: border-box; justify-content: center;">
+                        ✨ 载入新项目
+                        <input type="file" id="upload-v2" webkitdirectory multiple>
+                    </label>
+                </div>
+            </div>
+
+            <div id="tree-container">
+                <div style="text-align: center; color: var(--text-mute); font-size: 12px; margin-top: 40px; padding: 0 20px; line-height: 1.6;">
+                    请分别选择两个版本的<br>文件夹进行对比
+                </div>
+            </div>
+        </div>
+
+        <div id="editor-wrapper">
+            <div id="loading-overlay">正在准备编辑器引擎...</div>
+            <div id="monaco-diff"></div>
+        </div>
+    </main>
+
+    <script>
+        let v1Files = {};
+        let v2Files = {};
+        let diffEditor = null;
+        let currentPath = null;
+        let isReady = false;
+
+        require.config({ paths: { 'vs': 'https://cdn.staticfile.net/monaco-editor/0.39.0/min/vs' }});
+        
+        window.onload = () => {
+            require(['vs/editor/editor.main'], function() {
+                isReady = true;
+                document.getElementById('loading-overlay').style.display = 'none';
+                
+                diffEditor = monaco.editor.createDiffEditor(document.getElementById('monaco-diff'), {
+                    theme: 'vs-dark',
+                    automaticLayout: true,
+                    readOnly: true,
+                    fontSize: 13,
+                    fontFamily: "'Cascadia Code', 'Consolas', monospace",
+                    renderSideBySide: true,
+                    scrollBeyondLastLine: false
+                });
+            });
+        };
+
+        function changeTheme() { 
+            if(isReady) monaco.editor.setTheme(document.getElementById('theme-selector').value); 
+        }
+
+        function clearWorkspace() {
+            if(!confirm("确定要重置当前比对任务吗？")) return;
+            v1Files = {};
+            v2Files = {};
+            currentPath = null;
+            document.getElementById('tree-container').innerHTML = `
+                <div style="text-align: center; color: var(--text-mute); font-size: 12px; margin-top: 40px; padding: 0 20px;">
+                    工作区已重置
+                </div>`;
+            if (isReady && diffEditor) {
+                const emptyModel = monaco.editor.createModel("", "plaintext");
+                diffEditor.setModel({ original: emptyModel, modified: emptyModel });
+            }
+        }
+
+        async function handleUpload(event, storage) {
+            const files = event.target.files;
+            if (!files.length) return;
+
+            for (let key in storage) delete storage[key];
+
+            for (let file of files) {
+                const fullPath = file.webkitRelativePath;
+                if (fullPath.includes('.git/') || fullPath.includes('node_modules/') || fullPath.includes('__pycache__')) continue;
+                
+                const firstSlash = fullPath.indexOf('/');
+                const path = firstSlash !== -1 ? fullPath.substring(firstSlash + 1) : fullPath;
+                if (path === "") continue;
+
+                storage[path] = await file.text();
+            }
+            renderFileTree();
+        }
+
+        document.getElementById('upload-v1').addEventListener('change', e => handleUpload(e, v1Files));
+        document.getElementById('upload-v2').addEventListener('change', e => handleUpload(e, v2Files));
+
+        function renderFileTree() {
+            const allPaths = new Set([...Object.keys(v1Files), ...Object.keys(v2Files)]);
+            if (allPaths.size === 0) return;
+
+            const treeData = {};
+            allPaths.forEach(path => {
+                const parts = path.split('/');
+                let curr = treeData;
+                parts.forEach((part, index) => {
+                    if (!curr[part]) curr[part] = (index === parts.length - 1) ? { _path: path } : {};
+                    curr = curr[part];
+                });
+            });
+
+            const container = document.getElementById('tree-container');
+            container.innerHTML = "";
+            const rootUl = document.createElement('ul');
+            rootUl.className = "tree-list";
+            buildTreeDOM(treeData, rootUl);
+            container.appendChild(rootUl);
+        }
+
+        function buildTreeDOM(obj, parentEl) {
+            const keys = Object.keys(obj).sort((a, b) => {
+                const aIsFile = !!obj[a]._path;
+                const bIsFile = !!obj[b]._path;
+                return aIsFile - bIsFile;
+            });
+
+            keys.forEach(key => {
+                const data = obj[key];
+                const isFile = !!data._path;
+                const li = document.createElement('li');
+                const item = document.createElement('div');
+                item.className = "tree-item";
+
+                if (isFile) {
+                    const path = data._path;
+                    const isNew = v1Files[path] === undefined;
+                    const isDeleted = v2Files[path] === undefined;
+                    const isModified = !isNew && !isDeleted && (v1Files[path] !== v2Files[path]);
+
+                    let statusClass = "";
+                    if (isNew) statusClass = "status-added";
+                    else if (isDeleted) statusClass = "status-deleted";
+                    else if (isModified) statusClass = "status-modified";
+
+                    item.innerHTML = `<span class="file-icon">📄</span> <span class="${statusClass}">${key}</span>`;
+                    if (currentPath === path) item.classList.add('active');
+                    
+                    item.onclick = () => {
+                        if(!isReady) return;
+                        document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('active'));
+                        item.classList.add('active');
+                        loadDiff(path);
+                    };
+                    li.appendChild(item);
+                } else {
+                    item.innerHTML = `<span class="folder-icon">📂</span> <span>${key}</span>`;
+                    const subUl = document.createElement('ul');
+                    subUl.className = "tree-list";
+                    
+                    item.onclick = () => {
+                        const isHidden = subUl.style.display === "none";
+                        subUl.style.display = isHidden ? "block" : "none";
+                        item.querySelector('.folder-icon').innerHTML = isHidden ? "📂" : "📁";
+                    };
+                    
+                    li.appendChild(item);
+                    li.appendChild(subUl);
+                    buildTreeDOM(data, subUl);
+                }
+                parentEl.appendChild(li);
+            });
+        }
+
+        function loadDiff(path) {
+            if (!isReady) return;
+            currentPath = path;
+            const ext = path.split('.').pop();
+            const langMap = { js:'javascript', py:'python', html:'html', css:'css', ts:'typescript', json:'json', c:'cpp', cpp:'cpp', md:'markdown' };
+            const lang = langMap[ext] || 'plaintext';
+
+            const model1 = monaco.editor.createModel(v1Files[path] || "", lang);
+            const model2 = monaco.editor.createModel(v2Files[path] || "", lang);
+            diffEditor.setModel({ original: model1, modified: model2 });
+        }
+    </script>
+</body>
+</html>
